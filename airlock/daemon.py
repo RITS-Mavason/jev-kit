@@ -5,7 +5,7 @@ Callers on this box pay ~0.3s per judgement (reused TLS connection) instead
 of ~0.9s (fresh DNS + TCP + TLS every call). Standard library only.
 
 Listens on a Unix domain socket at $XDG_RUNTIME_DIR/airlock/airlock.sock
-(fallback /run/user/<uid>/airlock/airlock.sock), directory mode 700,
+(fallback /run/user/<uid>/airlock/airlock.sock, or $TMPDIR on macOS), directory mode 700,
 socket mode 600 -- no TCP listener, so only this user can ever reach it. The
 daemon always binds the NEW name; only a client falls back to the old
 jev-guard socket, so a machine mid-cutover never ends up with two daemons

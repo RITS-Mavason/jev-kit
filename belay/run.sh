@@ -26,7 +26,7 @@ else
 fi
 envfile="$(airlock_key_file)"
 if [ -z "${TYPESAFE_API_KEY:-}" ] && [ -r "$envfile" ]; then
-  TYPESAFE_API_KEY="$(sed -n 's/^ *\(export \)\?TYPESAFE_API_KEY=//p' "$envfile" | head -1)"
+  TYPESAFE_API_KEY="$(sed -nE 's/^ *(export +)?TYPESAFE_API_KEY=//p' "$envfile" | head -1)"
 fi
 [ -n "${TYPESAFE_API_KEY:-}" ] || exit 0
 export TYPESAFE_API_KEY JEV_BELAY_LOG=1

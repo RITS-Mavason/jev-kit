@@ -29,6 +29,8 @@ What actually differs, and what this module does about it:
   unix sockets      `socket.AF_UNIX` does not exist on Windows, so the warm
                     daemon has no transport there. Windows clients go straight
                     to the direct HTTPS call.
+  runtime dir       macOS has no /run/user/<uid>, so the daemon socket goes
+                    under $TMPDIR, which macOS makes per-user and mode 700.
 
 Stdlib only, and it imports nothing else from airlock, so the hot path in
 hooks/airlock.py can use it without dragging in client, guards or policy.
@@ -54,6 +56,16 @@ def is_windows(windows=None, platform=None):
         return bool(windows)
     try:
         return (platform if platform is not None else sys.platform) in WINDOWS_PLATFORMS
+    except Exception:
+        return False
+
+
+def is_macos(macos=None, platform=None):
+    """True on macOS. Same injection points as is_windows. Never raises."""
+    if macos is not None:
+        return bool(macos)
+    try:
+        return (platform if platform is not None else sys.platform) == "darwin"
     except Exception:
         return False
 

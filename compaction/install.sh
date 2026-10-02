@@ -92,7 +92,7 @@ fi
 if [ -z "${TYPESAFE_API_KEY:-}" ]; then
   KEY_FILE="$(airlock_key_file)"
   if [ -r "$KEY_FILE" ]; then
-    TYPESAFE_API_KEY="$(sed -n 's/^ *\(export \)\?TYPESAFE_API_KEY=//p' "$KEY_FILE" | head -1)"
+    TYPESAFE_API_KEY="$(sed -nE 's/^ *(export +)?TYPESAFE_API_KEY=//p' "$KEY_FILE" | head -1)"
   fi
 fi
 if [ -z "${TYPESAFE_API_KEY:-}" ]; then

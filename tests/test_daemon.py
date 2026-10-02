@@ -399,9 +399,20 @@ class TestSocketAndDirModes(unittest.TestCase):
     def test_socket_path_falls_back_to_run_user_uid(self):
         env = dict(os.environ)
         env.pop("XDG_RUNTIME_DIR", None)
-        with mock.patch.dict(os.environ, env, clear=True):
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch("airlock.paths.is_macos", lambda *a, **k: False):
             d, p = daemon._socket_dir_and_path()
             self.assertEqual(d, "/run/user/%d/airlock" % os.getuid())
+
+    def test_socket_path_falls_back_to_tmpdir_on_macos(self):
+        env = dict(os.environ)
+        env.pop("XDG_RUNTIME_DIR", None)
+        env["TMPDIR"] = "/var/folders/xy/abc/T/"
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch("airlock.paths.is_macos", lambda *a, **k: True):
+            d, p = daemon._socket_dir_and_path()
+            self.assertEqual(d, "/var/folders/xy/abc/T/airlock")
+            self.assertEqual(p, "/var/folders/xy/abc/T/airlock/airlock.sock")
 
 
 @posix_only("the daemon binds a Unix domain socket; it does not run on Windows at all")

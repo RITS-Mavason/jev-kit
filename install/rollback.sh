@@ -21,7 +21,9 @@ if [ -z "$CURRENT_REAL" ]; then
 fi
 CURRENT_NAME="$(basename "$CURRENT_REAL")"
 
-mapfile -t ALL_RELEASES < <(ls -1t "$RELEASES_DIR" 2>/dev/null | grep -v '^\.export-')
+# A read loop, not mapfile: macOS ships bash 3.2, which has no mapfile.
+ALL_RELEASES=()
+while IFS= read -r r; do ALL_RELEASES+=("$r"); done < <(ls -1t "$RELEASES_DIR" 2>/dev/null | grep -v '^\.export-')
 
 PREVIOUS=""
 for i in "${!ALL_RELEASES[@]}"; do
@@ -38,7 +40,7 @@ fi
 
 TMP_LINK="$AIRLOCK_HOME/.current.tmp.$$"
 ln -sfn "$RELEASES_DIR/$PREVIOUS" "$TMP_LINK"
-mv -T "$TMP_LINK" "$CURRENT_LINK"
+python3 -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$TMP_LINK" "$CURRENT_LINK"
 
 echo "rollback.sh: current $CURRENT_NAME -> $PREVIOUS"
 echo "current -> $(readlink -f "$CURRENT_LINK")"

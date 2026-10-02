@@ -477,8 +477,10 @@ class TestTheModuleCli(unittest.TestCase):
                               env=env_desktop, timeout=30)
         self.assertEqual(proc.returncode, 1)
         # Which reason wins depends on the host: a desktop Linux box says
-        # DISPLAY, a WSL host says WSL first. Either is a correct "not headless".
-        self.assertTrue("DISPLAY" in proc.stdout or "WSL" in proc.stdout, proc.stdout)
+        # DISPLAY, a WSL host says WSL first, macOS says not Linux. Each is a
+        # correct "not headless".
+        self.assertTrue(any(r in proc.stdout for r in ("DISPLAY", "WSL", "not Linux")),
+                        proc.stdout)
 
     def test_merge_prints_status_and_detail_tab_separated(self):
         with tempfile.TemporaryDirectory() as d:
