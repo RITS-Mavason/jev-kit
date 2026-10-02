@@ -373,8 +373,11 @@ launchctl bootout gui/$(id -u)/dev.airlock.daemon
 rm ~/Library/LaunchAgents/dev.airlock.daemon.plist
 ```
 
-`plocate` is Linux only, so there is no file index on macOS yet, and
-`--filesearch` is skipped.
+`plocate` is Linux only, so `--filesearch` is skipped. The file-search rule
+steers at Spotlight (`mdfind`) instead, which needs nothing installed:
+`install/doctor.sh` reports whether its indexing is on. `--claude-update` is
+skipped too. It finds running sessions through `/proc`, which macOS lacks, and
+Claude Code updates itself there.
 
 ## Tuning and promotion
 

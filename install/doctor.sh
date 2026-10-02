@@ -377,7 +377,15 @@ fi
 # ---------------------------------------------------------------------------
 head_ "Filesearch"
 DB="$HOME/.cache/plocate/home.db"
-if ! command -v plocate >/dev/null 2>&1; then
+if [ "$(uname -s)" = Darwin ]; then
+  # Spotlight is the index on macOS. Ask the live policy, so doctor and the
+  # guard cannot disagree about whether it is usable.
+  if [ "$(cd "$LIVE" && "$PY" -c 'from airlock import policy; print(policy.spotlight_available())' 2>/dev/null)" = "True" ]; then
+    pass "Spotlight: mdfind present and indexing enabled; a disk-wide filename search is steered to mdfind"
+  else
+    skip "Spotlight unusable (no mdfind, or indexing off: mdutil -s /); disk-wide filename searches are not steered"
+  fi
+elif ! command -v plocate >/dev/null 2>&1; then
   skip "plocate not installed"
 elif [ ! -f "$DB" ]; then
   skip "no index at $DB (run filesearch/install.sh)"
