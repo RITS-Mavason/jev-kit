@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The macOS counterpart of airlock-daemon.service. install/install.sh fills
+     the @...@ placeholders (launchd expands neither ~ nor %h) and loads it
+     into the gui/<uid> domain. TMPDIR is pinned so the daemon binds the same
+     socket the hooks look for (airlock/paths.py). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.airlock.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PYTHON@</string>
+    <string>-m</string>
+    <string>airlock.daemon</string>
+  </array>
+  <key>WorkingDirectory</key><string>@AIRLOCK_HOME@/current</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>@PATH@</string>
+    <key>TMPDIR</key><string>@TMPDIR@</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <!-- Restart=on-failure, RestartSec=5 -->
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>Nice</key><integer>5</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>@HOME@/Library/Logs/airlock/daemon.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/Library/Logs/airlock/daemon.log</string>
+</dict>
+</plist>

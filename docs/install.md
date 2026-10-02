@@ -350,6 +350,32 @@ closest thing to a step-by-step for a plain Linux server. For installing on a
 machine that belongs to somebody else, kept in shadow mode for a week before
 arming anything, see [INSTALL-SECOND-MACHINE.md](INSTALL-SECOND-MACHINE.md).
 
+## Install on macOS
+
+The same `install/install.sh`. It runs under the bash 3.2 that macOS ships,
+and needs Python 3.10 or newer (Homebrew's, not the `/usr/bin/python3` stub).
+In place of the systemd units it writes `launchd` agents to
+`~/Library/LaunchAgents` and loads them:
+
+| Agent | Replaces | Runs |
+|---|---|---|
+| `dev.airlock.daemon` | `airlock-daemon.service` | always, restarted if it crashes |
+| `dev.airlock.health` | `airlock-health.timer` | every 5 minutes |
+| `dev.airlock.tune` | `airlock-tune.timer` | every 30 minutes, `--tuning` only |
+
+Their output goes to `~/Library/Logs/airlock/`. `install/doctor.sh` checks
+that each one is loaded and that the daemon is running. To look at one, or
+to remove one:
+
+```bash
+launchctl print gui/$(id -u)/dev.airlock.daemon
+launchctl bootout gui/$(id -u)/dev.airlock.daemon
+rm ~/Library/LaunchAgents/dev.airlock.daemon.plist
+```
+
+`plocate` is Linux only, so there is no file index on macOS yet, and
+`--filesearch` is skipped.
+
 ## Tuning and promotion
 
 `tuning/tune.py` runs on a timer and reads recent rows out of the shadow log.

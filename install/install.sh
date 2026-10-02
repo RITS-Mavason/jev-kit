@@ -36,6 +36,7 @@ fi
 
 AIRLOCK_HOME="${AIRLOCK_HOME:-${PLUMBLINE_HOME:-${JEV_HOME:-$HOME/.local/share/airlock}}}"
 UNIT_DIR="$HOME/.config/systemd/user"
+AGENT_DIR="$HOME/Library/LaunchAgents"
 
 usage() {
   cat <<EOF
@@ -76,8 +77,9 @@ Options:
                  or a browser) on in rules.json. Detected automatically on a
                  Linux box with no display; this forces it
   --no-headless  never touch R6, whatever the detection says
-  --no-systemd   skip every timer and unit; the hook still works, and the
-                 client falls back to a direct HTTPS call with no daemon
+  --no-systemd   skip every timer and unit (launchd agents on macOS); the
+                 hook still works, and the client falls back to a direct
+                 HTTPS call with no daemon
   --check-only   check prerequisites and print the plan, install nothing
   -h, --help     this
 
@@ -182,8 +184,9 @@ else
   fail "python3 >= 3.10 not found; the guard is pure stdlib Python and needs it"
 fi
 
-# systemd user session
+# systemd user session, or launchd on macOS
 SYSTEMD_OK=0
+LAUNCHD_OK=0
 # macOS has no /run/user; airlock/paths.py falls back to $TMPDIR there.
 [ "$(uname -s)" = Darwin ] || : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
 export XDG_RUNTIME_DIR
@@ -192,6 +195,9 @@ if [ "$NO_SYSTEMD" = "1" ]; then
 elif command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   SYSTEMD_OK=1
   ok "systemd user session reachable (XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR)"
+elif [ "$(uname -s)" = Darwin ] && command -v launchctl >/dev/null 2>&1; then
+  LAUNCHD_OK=1
+  ok "launchd: the daemon and timers become agents in $AGENT_DIR"
 else
   NO_SYSTEMD=1
   warn "no systemd user session; degrading to no-systemd mode"
@@ -321,7 +327,13 @@ plan "$WANT_CLAUDE_UPDATE" "claude-update"
 plan "$WANT_BELAY" "belay"
 plan "$WANT_COMPACTION" "compaction"
 echo "   AIRLOCK_HOME=$AIRLOCK_HOME"
-echo "   systemd: $([ "$NO_SYSTEMD" = "1" ] && echo "no (timers and units skipped)" || echo yes)"
+if [ "$NO_SYSTEMD" = "1" ]; then
+  echo "   systemd: no (timers and units skipped)"
+elif [ "$LAUNCHD_OK" = "1" ]; then
+  echo "   launchd: yes (agents in $AGENT_DIR)"
+else
+  echo "   systemd: yes"
+fi
 
 if [ "$CHECK_ONLY" = "1" ]; then
   echo
@@ -348,6 +360,32 @@ enable_unit() {
     ok "enabled $name"
   else
     warn "could not enable $name; try: systemctl --user enable --now $name"
+  fi
+}
+
+# A launchd agent: fill the template's placeholders (launchd expands neither ~
+# nor %h), then reload it so a re-install picks up the new plist.
+install_agent() {
+  local src="$1" label dst domain
+  label="$(basename "$src" .plist)"
+  dst="$AGENT_DIR/$label.plist"
+  domain="gui/$(id -u)"
+  mkdir -p "$AGENT_DIR" "$HOME/Library/Logs/airlock"
+  sed -e "s|@PYTHON@|$PY|g" \
+      -e "s|@AIRLOCK_HOME@|$AIRLOCK_HOME|g" \
+      -e "s|@HOME@|$HOME|g" \
+      -e "s|@PATH@|$(dirname "$PY"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin|g" \
+      -e "s|@TMPDIR@|$(getconf DARWIN_USER_TEMP_DIR)|g" \
+      "$src" > "$dst"
+  chmod 644 "$dst"
+  launchctl bootout "$domain/$label" 2>/dev/null || true
+  # bootout returns before the old job is gone, so the first bootstrap can
+  # fail with an I/O error; one retry after a second is enough.
+  if launchctl bootstrap "$domain" "$dst" 2>/dev/null \
+     || { sleep 1; launchctl bootstrap "$domain" "$dst" 2>/dev/null; }; then
+    ok "loaded $label ($dst)"
+  else
+    warn "could not load $label; try: launchctl bootstrap $domain $dst"
   fi
 }
 
@@ -596,6 +634,8 @@ if [ "$WANT_DAEMON" = "1" ]; then
     warn "skipped: no systemd."
     warn "  airlock/client.py falls back to a direct HTTPS call automatically,"
     warn "  so every judgement still works -- it just costs ~0.9s instead of ~0.3s."
+  elif [ "$LAUNCHD_OK" = "1" ]; then
+    install_agent "$REPO_ROOT/deploy/dev.airlock.daemon.plist"
   else
     install_unit "$REPO_ROOT/deploy/airlock-daemon.service" "airlock-daemon.service"
     enable_unit "airlock-daemon.service"
@@ -688,6 +728,9 @@ if [ "$WANT_TUNING" = "1" ]; then
 
   if [ "$NO_SYSTEMD" = "1" ]; then
     warn "skipped: no systemd. Run tuning/tune.sh by hand or from cron."
+  elif [ "$LAUNCHD_OK" = "1" ]; then
+    install_agent "$REPO_ROOT/tuning/dev.airlock.tune.plist"
+    warn "auto-promotion stays OFF unless \$AIRLOCK_CONFIG_DIR/auto-promote exists."
   else
     install_unit "$REPO_ROOT/tuning/airlock-tune.service" "airlock-tune.service"
     install_unit "$REPO_ROOT/tuning/airlock-tune.timer" "airlock-tune.timer"
@@ -702,9 +745,13 @@ if [ "$WANT_MONITORING" = "1" ]; then
   if [ "$NO_SYSTEMD" = "1" ]; then
     warn "skipped: no systemd. Run monitoring/run_health_check.sh by hand or from cron."
   else
-    install_unit "$REPO_ROOT/monitoring/airlock-health.service" "airlock-health.service"
-    install_unit "$REPO_ROOT/monitoring/airlock-health.timer" "airlock-health.timer"
-    enable_unit "airlock-health.timer"
+    if [ "$LAUNCHD_OK" = "1" ]; then
+      install_agent "$REPO_ROOT/monitoring/dev.airlock.health.plist"
+    else
+      install_unit "$REPO_ROOT/monitoring/airlock-health.service" "airlock-health.service"
+      install_unit "$REPO_ROOT/monitoring/airlock-health.timer" "airlock-health.timer"
+      enable_unit "airlock-health.timer"
+    fi
     if [ -z "${AIRLOCK_KUMA_PUSH_URL:-}" ] && [ -z "${GS_KUMA_AIRLOCK_PUSH_URL:-}" ] \
        && [ -z "${GS_KUMA_JEV_PUSH_URL:-}" ]; then
       warn "AIRLOCK_KUMA_PUSH_URL is not set, so nothing is pushed to Uptime Kuma."
