@@ -1245,7 +1245,8 @@ class TestR11Enforce(unittest.TestCase):
 
 
 class TestStrictIsR11Only(unittest.TestCase):
-    """Closing the two escapes is scoped to R11. Every other rule keeps both."""
+    """Closing the two escapes is scoped to R11 and R7-root-delete. Every other
+    rule keeps both."""
 
     def setUp(self):
         self.logged = []
@@ -1274,7 +1275,9 @@ class TestStrictIsR11Only(unittest.TestCase):
                     continue
                 if match is not None and match.extra.get("strict"):
                     strict.add(rule.id)
-        self.assertEqual(strict, {"R11-browse-via-jev"})
+        # R7-root-delete (2026-10-02): a deny that passes on the second try, or
+        # with a stamp, would not stop `rm -rf /` at all.
+        self.assertEqual(strict, {"R11-browse-via-jev", "R7-root-delete"})
 
     def _sudo(self, **ti):
         payload = {"session_id": "sess-strict", "cwd": "/tmp", "tool_name": "Bash",
@@ -1307,3 +1310,98 @@ class TestStrictIsR11Only(unittest.TestCase):
         denied, deny = self._run(self._sudo())
         self.assertTrue(denied)
         self.assertIn("[airlock-ok: <reason>]", deny.call_args[0][0])
+
+
+    def test_root_delete_ignores_a_stamp_and_a_repeat(self):
+        # Jonathan, 2026-10-02: airlock must deny `rm -rf /`. A stamp the model
+        # writes itself, or simply asking twice, must not get it through.
+        live = {"R5-sudo": "warn", "R6-gui-or-browser": "off"}
+        stamp = "[airlock-ok: the human asked for this]"
+        for cmd in ("rm -rf /", "sudo rm -rf ~"):
+            for ti, repeat in (({"description": "cleanup " + stamp}, False),
+                               ({"command": cmd + "  # " + stamp}, False),
+                               ({}, True),
+                               ({"description": stamp}, True)):
+                payload = {"session_id": "sess-root", "cwd": "/tmp", "tool_name": "Bash",
+                           "tool_input": dict({"command": cmd}, **ti)}
+                with mock.patch("airlock.rules.load_action_overrides", return_value=live):
+                    denied, deny = self._run(payload, recently_denied=repeat)
+                self.assertTrue(denied, (cmd, ti, repeat))
+                self.assertIn("R7-root-delete", deny.call_args[0][0], (cmd, ti, repeat))
+                self.assertNotIn("[airlock-ok: <reason>]", deny.call_args[0][0])
+
+
+class RootDeleteDenyTests(unittest.TestCase):
+    """R7-root-delete: a recursive delete of / or the home directory is
+    DENIED, behind any wrapper and past sudo, whatever R5's own level is.
+    Everything else R7-destructive covers stays a warning."""
+
+    LIVE_LIKE = {"R6-gui-or-browser": "off", "R5-sudo": "warn"}
+
+    def _deny(self, cmd, overrides=None):
+        rows = fired(ctx_bash(cmd), "R7-root-delete", overrides=overrides)
+        return [r for r in rows if r["fires"] and r["action"] == "deny"]
+
+    def test_root_and_home_forms_denied(self):
+        for cmd in ("rm -rf /", "rm -rf / ", "rm -rf //", "rm -rf ///", "rm -r -f /",
+                    "rm --recursive --force /", "rm -fr /", "rm -Rf /", "rm -rf -- /",
+                    "rm -R ~", "(cd x && rm -rf /)", "(rm -rf /)", "{ rm -rf /; }",
+                    "timeout 5 rm -rf /", "timeout -s KILL 5 rm -rf /", "env -i rm -rf /",
+                    "env FOO=1 rm -rf /", "nice rm -rf /", "nice -n 10 rm -rf /",
+                    "rm -rf /*", "rm -rf ~", "rm -rf ~/", "rm -rf ~/*", "rm -rf $HOME",
+                    'rm -rf "$HOME"', "rm -rf ${HOME}", "rm -rf " + HOME, "rm -rf " + HOME + "/",
+                    "echo $(rm -rf /)", "ls && rm -rf /", "true; rm -rf ~"):
+            self.assertTrue(self._deny(cmd), cmd)
+
+    def test_sudo_forms_denied_even_with_r5_at_warn(self):
+        for cmd in ("sudo rm -rf /", "sudo rm -rf /*", "sudo -u root rm -rf /", "sudo -E rm -rf /",
+                    "sudo -- rm -rf /", "sudo -iu root rm -rf /", "sudo --user=root rm -rf ~",
+                    'sudo sh -c "rm -rf /"', "bash -c 'rm -rf ~'", 'sudo bash -c "cd / && rm -rf /"'):
+            self.assertTrue(self._deny(cmd, overrides=self.LIVE_LIKE), cmd)
+
+    def test_ordinary_deletes_not_denied(self):
+        for cmd in ("rm -rf ./build", "rm -rf node_modules", "rm -rf build/*", "rm -rf /tmp/x",
+                    "rm -rf /tmp/x/*", "rm -f /", "rm -rf ''", "rm -rf *", "cd build && rm -rf *",
+                    "rm -rf .", "rm -rf ~/scratch", "rm -rf ~/.cache/*", "rm -rf $HOME/x",
+                    'D=$(mktemp -d); rm -rf "$D/"', "sudo rm -rf /var/tmp/x",
+                    "sudo systemctl restart nginx", "echo 'rm -rf /'", "git commit -m 'never rm -rf /'",
+                    "grep -rn 'rm -rf /' .", "cat > f <<'EOF'\nrm -rf /\nEOF",
+                    "sh -c 'rm -rf /tmp/x'", "find / -name x"):
+            self.assertFalse(self._deny(cmd, overrides=self.LIVE_LIKE), cmd)
+
+    def test_compound_command_keywords_do_not_hide_rm(self):
+        for cmd in ("if true; then rm -rf /*; fi", "for d in a; do rm -rf ~; done",
+                    "while true; do rm -rf ~/*; done", "if x; then :; else rm -rf ~; fi",
+                    "if x; then :; elif y; then rm -rf /; fi", "until false; do rm -rf /; done"):
+            self.assertTrue(self._deny(cmd), cmd)
+
+    def test_shell_c_in_an_option_cluster(self):
+        for cmd in ("bash -lc 'rm -rf ~'", "sh -xc 'rm -rf /*'", "bash -euc 'rm -rf /'",
+                    "bash --login -c 'rm -rf ~'", "bash -o pipefail -c 'rm -rf /'"):
+            self.assertTrue(self._deny(cmd, overrides=self.LIVE_LIKE), cmd)
+        for cmd in ("bash -lc 'rm -rf /tmp/x'", "bash script.sh -c 'rm -rf /'"):
+            self.assertFalse(self._deny(cmd, overrides=self.LIVE_LIKE), cmd)
+
+    def test_backslash_and_inner_quotes_are_removed(self):
+        for cmd in ("\\rm -rf ~", "\\rm -rf /", "rm -rf \\/", 'rm -rf "/"*', "rm -rf '/'*",
+                    "r\\m -rf /", 'rm -rf "$HOME"/*'):
+            self.assertTrue(self._deny(cmd), cmd)
+        # an escaped tilde is a file literally named ~, not the home directory
+        for cmd in ("rm -rf \\~", "rm -rf ./\\~"):
+            self.assertFalse(self._deny(cmd), cmd)
+
+    def test_escaped_hash_is_not_a_comment(self):
+        # bash reads `\ #` as one word, so the rm after it runs: never treat a
+        # `#` after an escaped character as the start of a comment.
+        for cmd in ("echo \\ #; rm -rf /", "echo a\\ #x; rm -rf /", "echo \\#; rm -rf /",
+                    "echo x#y; rm -rf /", "echo $#; rm -rf /", "echo ${#x}; rm -rf /"):
+            self.assertTrue(self._deny(cmd), cmd)
+
+    def test_other_r7_shapes_stay_warn(self):
+        for cmd in ("git push --force", "git reset --hard", "rm -rf *", "rm -rf ."):
+            self.assertFalse(self._deny(cmd), cmd)
+            self.assertTrue([r for r in fired(ctx_bash(cmd), "R7-destructive") if r["fires"]], cmd)
+
+    def test_strict_so_no_stamp_or_repeat_gets_through(self):
+        m = rules.prefilter_root_delete(ctx_bash("rm -rf /"))
+        self.assertTrue(m.extra.get("strict"))
