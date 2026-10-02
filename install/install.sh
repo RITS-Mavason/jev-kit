@@ -241,6 +241,14 @@ else
   warn "plocate not installed (only needed for --filesearch)"
 fi
 
+# claude-update finds running sessions through /proc, which macOS does not
+# have, so there it would see none and update in the middle of one. Claude
+# Code's native install on macOS updates itself anyway.
+if [ "$WANT_CLAUDE_UPDATE" = "1" ] && [ "$(uname -s)" = Darwin ]; then
+  WANT_CLAUDE_UPDATE=0
+  warn "claude-update: skipped on macOS (it cannot see running sessions here)"
+fi
+
 if command -v node >/dev/null 2>&1; then
   ok "node $(node --version)"
 else

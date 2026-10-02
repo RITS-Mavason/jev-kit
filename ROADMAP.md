@@ -9,9 +9,6 @@ and is itemised there rather than repeated.
 - **Native Windows support.** Not built, not run, itemised in
   [docs/native-windows.md](docs/native-windows.md).
   Everything (`es.exe`) file search on Windows is part of that work.
-- **macOS has no file index.** The guard, daemon, health check and tuning
-  run under `launchd`. File search should steer at Spotlight (`mdfind`), which
-  keeps a live index like Everything does on Windows.
 - **The installer and doctor are bash.** Porting both to Python would remove
   the Git Bash dependency on Windows and would suit a project whose guard is
   already stdlib Python.
