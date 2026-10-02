@@ -241,6 +241,7 @@ def compute_search_entry(data, timeout_s=None):
         roots=scope_result.get("roots"),
         db_kind=db_kind,
         has_es=has_es,
+        macos=policy.is_macos(),
     )
     entry["would_deny"] = verdict["would_deny"] and not sampled
     entry["suggestion"] = verdict.get("suggestion")

@@ -24,13 +24,18 @@ from airlock import policy as _policy_mod
 # tests/test_wsl_filesearch.py.
 _AVAIL = mock.patch.object(_policy_mod, "detect_availability",
                            lambda *a, **k: ("home", True))
+# ...and that it is not a Mac, where the live guard steers to Spotlight
+# instead (tests/test_macos_spotlight.py).
+_NOT_MAC = mock.patch.object(_policy_mod, "is_macos", lambda *a, **k: False)
 
 
 def setUpModule():
     _AVAIL.start()
+    _NOT_MAC.start()
 
 
 def tearDownModule():
+    _NOT_MAC.stop()
     _AVAIL.stop()
 
 
