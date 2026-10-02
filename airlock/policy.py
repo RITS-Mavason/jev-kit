@@ -10,7 +10,7 @@ import shlex
 from pathlib import Path
 
 from . import tiers, winpath
-from .platform_compat import is_windows
+from .platform_compat import is_macos, is_windows
 
 CONFIDENCE_THRESHOLD = 0.8
 MARGIN_THRESHOLD = 0.4
@@ -421,6 +421,19 @@ ES_SUGGESTION = (
     '-i to make the match case-sensitive)'
 )
 
+# The macOS counterpart. Spotlight keeps a live index too, so it answers the
+# way Everything does on Windows. -name matches any part of the name, without
+# case and without wildcards; the kMDItemFSName form takes a glob. mdfind
+# prints locale chatter on stderr, hence 2>/dev/null. Spotlight never indexes
+# hidden folders (~/.config, ~/.local, ...) or paths excluded in System
+# Settings, so the advice says to crawl those directly.
+MDFIND_SUGGESTION = (
+    "mdfind -onlyin ~ -name '<name fragment>' 2>/dev/null\n"
+    "mdfind -onlyin ~ 'kMDItemFSName == \"*.xlsm\"' 2>/dev/null    # a glob\n"
+    "    (Spotlight's index answers instantly. It skips hidden folders such\n"
+    "     as ~/.config, so search those with find <dir> -name '<pattern>')"
+)
+
 # Under WSL, plocate only indexes $HOME on the Linux side -- it structurally
 # cannot answer for a root that lives on the Windows host. voidtools
 # Everything can, and its client is on PATH there too, just reached under its
@@ -496,7 +509,12 @@ def detect_availability(windows=None):
     guard to pass into filename_search_suggestion() and evaluate_search().
 
     Only the deny path calls this. Everything else keeps the assumed values
-    above, so policy generation stays identical on every host."""
+    above, so policy generation stays identical on every host.
+
+    On macOS `has_es` answers for Spotlight, the live index there, so the
+    same flag means "the platform's live index is usable" everywhere."""
+    if is_macos():
+        return (plocate_db_kind(), spotlight_available())
     return (plocate_db_kind(), es_available(windows))
 
 
@@ -652,6 +670,27 @@ def es_available(windows=None):
             except Exception:
                 usable = False
         _AVAILABILITY_CACHE[key] = bool(usable)
+    return _AVAILABILITY_CACHE[key]
+
+
+def spotlight_available():
+    """Is Spotlight usable: mdfind on PATH and indexing enabled on `/`?
+
+    Same rule as es_available: only a probe that says "enabled" counts. With
+    indexing off, mdfind runs and returns nothing, and a deny would block a
+    working crawl in favour of a query that finds no files."""
+    key = ("spotlight_usable",)
+    if key not in _AVAILABILITY_CACHE:
+        usable = False
+        if _tool_on_path("mdfind"):
+            try:
+                import subprocess
+                out = subprocess.run(["mdutil", "-s", "/"], capture_output=True,
+                                     text=True, timeout=2)
+                usable = "Indexing enabled" in out.stdout
+            except Exception:
+                usable = False
+        _AVAILABILITY_CACHE[key] = usable
     return _AVAILABILITY_CACHE[key]
 
 
@@ -906,7 +945,7 @@ def any_root_is_wsl_fs_root(roots):
 # caller has to test sys.platform for itself.
 def filename_search_suggestion(windows=None, roots=None, wsl=None,
                                db_kind=UNSET, has_es=UNSET,
-                               follow_symlinks=True):
+                               follow_symlinks=True, macos=False):
     """The command to run INSTEAD of a disk-wide filename crawl.
 
     Native Windows gets ES_SUGGESTION, unless Everything is unusable on
@@ -927,9 +966,15 @@ def filename_search_suggestion(windows=None, roots=None, wsl=None,
     PLOCATE_SUGGESTION. `wsl` defaults
     lazily from airlock.headless.is_wsl() so existing zero-arg and
     windows=-only call sites keep working unchanged; a failure to detect WSL
-    is treated as False, never raised."""
+    is treated as False, never raised.
+
+    macOS (`macos=True`, passed only by the live guard) gets
+    MDFIND_SUGGESTION, gated on Spotlight the way Windows is on Everything:
+    `has_es` carries whether Spotlight is usable there."""
     if is_windows(windows):
         return ES_SUGGESTION if _es_ok(windows, has_es) else None
+    if macos:
+        return MDFIND_SUGGESTION if _es_ok(windows, has_es) else None
     wsl = _wsl_default(wsl)
     roots = resolve_roots(roots, follow_symlinks=follow_symlinks)
     kind = ASSUMED_DB_KIND if db_kind is UNSET else db_kind
@@ -1191,10 +1236,13 @@ def command_already_uses_locate(command):
     return command_already_uses_indexed_search(command)
 
 
-def command_already_uses_indexed_search(command, windows=None, wsl=None):
+def command_already_uses_indexed_search(command, windows=None, wsl=None,
+                                        macos=False):
     command = command or ""
     if _command_position_is_locate(command):
         return True
+    if macos:
+        return _invokes_program(command, ("mdfind",))
     if is_windows(windows):
         if _command_position_is_es(command):
             return True
@@ -1223,7 +1271,7 @@ def _wsl_default(wsl):
 
 
 def command_covers_roots(command, roots=None, windows=None, wsl=None,
-                         db_kind=UNSET, has_es=UNSET):
+                         db_kind=UNSET, has_es=UNSET, macos=False):
     """Does the command already reach for an index that covers EVERY root it
     searches?
 
@@ -1244,6 +1292,9 @@ def command_covers_roots(command, roots=None, windows=None, wsl=None,
     command = command or ""
     if is_windows(windows):
         return command_already_uses_indexed_search(command, windows, wsl)
+    if macos:
+        # Spotlight indexes every volume, so naming it covers every root.
+        return command_already_uses_indexed_search(command, macos=True)
     if not _wsl_default(wsl) or not roots:
         return command_already_uses_indexed_search(command, windows, wsl)
     kind = ASSUMED_DB_KIND if db_kind is UNSET else db_kind
@@ -1281,7 +1332,7 @@ def command_covers_roots(command, roots=None, windows=None, wsl=None,
 
 def evaluate_search(scope, search_intent, confidence, command, root_has_graphify_graph,
                     margin=None, windows=None, roots=None, wsl=None,
-                    db_kind=UNSET, has_es=UNSET):
+                    db_kind=UNSET, has_es=UNSET, macos=False):
     """Return the tool-choice-guard verdict for one Bash search command.
 
     would_deny (indexed-search suggestion): scope == disk_wide AND
@@ -1318,11 +1369,12 @@ def evaluate_search(scope, search_intent, confidence, command, root_has_graphify
             (scope == "disk_wide" or windows_host_root)
             and search_intent == "filename_search"
             and not command_covers_roots(command, roots, windows, wsl,
-                                         db_kind=db_kind, has_es=has_es)
+                                         db_kind=db_kind, has_es=has_es,
+                                         macos=macos)
         ):
             suggestion = filename_search_suggestion(
                 windows, roots, wsl, db_kind=db_kind, has_es=has_es,
-                follow_symlinks=follows)
+                follow_symlinks=follows, macos=macos)
             # No usable replacement on this machine means no deny. Blocking
             # a crawl and naming a tool the box does not have takes away the
             # only command that would have answered the question.

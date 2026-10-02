@@ -31,6 +31,7 @@ load-bearing on it yet.
 | **Compaction** (`compaction/`) | Installer for the community `fast-jev-compaction` plugin. **Read `compaction/README.md` first.** | no (`--compaction`) | never enabled here | **Up to roughly 25,000 tokens of raw, unredacted tool inputs and tool-result text per request.** By far the largest exposure here, which is why it is never installed for you. |
 | **File search** (`filesearch/`) | Per-user `plocate` index of `$HOME` and its hourly timer, so R8 can suggest an indexed search. | **yes** (`--filesearch`) | exercised | Nothing. Entirely local. |
 | **File search on Windows** (`airlock/everything.py`) | Detects [Everything](https://www.voidtools.com/) (`es.exe`) and whether its index is running, so the same R8 steer names `es.exe` instead of `plocate`. It **detects only and never installs either**: Everything is third-party software with its own installer and service, and airlock says what the human must do rather than doing it. | **yes** on native Windows, n/a elsewhere | run on one Windows 11 machine | Nothing. Entirely local. |
+| **File search on macOS** (`airlock/policy.py`) | Detects Spotlight (`mdfind` on PATH and `mdutil -s /` reporting indexing enabled), so the same R8 steer names `mdfind` instead of `plocate`. With indexing off it never denies, because `mdfind` would then find nothing. Spotlight skips hidden folders such as `~/.config`, and the steer says so. | **yes** on macOS, n/a elsewhere | run on one macOS 27 machine | Nothing. Entirely local. |
 
 ## Uses
 
