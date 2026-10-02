@@ -398,7 +398,21 @@ fi
 
 # ---------------------------------------------------------------------------
 head_ "Timers"
-if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+if [ "$(uname -s)" = Darwin ]; then
+  # launchd agents. A timer agent is loaded and idle between runs, so
+  # "loaded" is the pass; the daemon must also have a live pid.
+  for label in dev.airlock.daemon dev.airlock.health dev.airlock.tune; do
+    if [ ! -f "$HOME/Library/LaunchAgents/$label.plist" ]; then
+      skip "$label not installed"
+    elif ! info="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null)"; then
+      fail "$label installed but not loaded (launchctl bootstrap gui/$(id -u) $HOME/Library/LaunchAgents/$label.plist)"
+    elif [ "$label" = dev.airlock.daemon ] && ! printf '%s' "$info" | grep -q 'pid = '; then
+      fail "$label loaded but not running; see ~/Library/Logs/airlock/daemon.log"
+    else
+      pass "$label: loaded, $(printf '%s' "$info" | sed -n 's/^[[:space:]]*state = //p' | head -1)"
+    fi
+  done
+elif ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
   skip "no systemd user session; nothing is scheduled (see install/install.sh --help)"
 else
   for unit in airlock-daemon.service airlock-health.timer airlock-tune.timer airlock-filesearch.timer; do
