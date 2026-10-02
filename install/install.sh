@@ -184,7 +184,8 @@ fi
 
 # systemd user session
 SYSTEMD_OK=0
-: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+# macOS has no /run/user; airlock/paths.py falls back to $TMPDIR there.
+[ "$(uname -s)" = Darwin ] || : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
 export XDG_RUNTIME_DIR
 if [ "$NO_SYSTEMD" = "1" ]; then
   warn "systemd: skipped (--no-systemd)"
@@ -487,7 +488,7 @@ if [ "$WANT_GUARD" = "1" ]; then
     warn "  first install but means a git operation here changes what is live."
     mkdir -p "$AIRLOCK_HOME"
     ln -sfn "$REPO_ROOT" "$AIRLOCK_HOME/.current.tmp.$$"
-    mv -T "$AIRLOCK_HOME/.current.tmp.$$" "$AIRLOCK_HOME/current"
+    python3 -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$AIRLOCK_HOME/.current.tmp.$$" "$AIRLOCK_HOME/current"
     ok "current -> $REPO_ROOT"
   fi
 
@@ -578,7 +579,7 @@ EOF
     [ "$WANT_BELAY" = "1" ] && WIRE_EXTRA_FLAGS+=("--belay")
     [ "$WANT_SESSION_CHECK" = "1" ] || WIRE_EXTRA_FLAGS+=("--no-session-check")
     AIRLOCK_HOME="$AIRLOCK_HOME" JEV_HOME="$AIRLOCK_HOME" AIRLOCK_PYTHON3="$PY" \
-      "$SCRIPT_DIR/wire.sh" --apply "${WIRE_EXTRA_FLAGS[@]}" "${WIRE_FILES[@]}"
+      "$SCRIPT_DIR/wire.sh" --apply ${WIRE_EXTRA_FLAGS[@]+"${WIRE_EXTRA_FLAGS[@]}"} "${WIRE_FILES[@]}"
   else
     echo "   No --wire given, so no settings.json was touched. To preview an edit"
     echo "   to an existing entry:"

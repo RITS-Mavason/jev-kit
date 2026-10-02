@@ -28,8 +28,11 @@ fi
 
 AIRLOCK_HOME="${AIRLOCK_HOME:-${PLUMBLINE_HOME:-${JEV_HOME:-$HOME/.local/share/airlock}}}"
 PY="${PYTHON:-python3}"
-: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+# macOS has no /run/user; airlock/paths.py falls back to $TMPDIR there.
+[ "$(uname -s)" = Darwin ] || : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
 export XDG_RUNTIME_DIR
+# macOS has no `timeout`: run those checks without the limit rather than fail them.
+command -v timeout >/dev/null 2>&1 || timeout() { shift; "$@"; }
 
 FAILED=0
 PASSED=0

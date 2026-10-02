@@ -29,13 +29,23 @@ _AVAIL = mock.patch.multiple(policy,
                              es_available=lambda *a, **k: True,
                              plocate_db_kind=lambda *a, **k: "home")
 
+# macOS resolves /home/alice to /System/Volumes/Data/home/alice (autofs), so
+# the fixture HOME would stop matching its own roots. Leave /home paths alone;
+# everything else, the tempdir symlinks included, still goes through realpath.
+_REAL_RESOLVE_ROOT = policy.resolve_root
+_RESOLVE = mock.patch.object(
+    policy, "resolve_root",
+    lambda r: r if str(r).startswith("/home/") else _REAL_RESOLVE_ROOT(r))
+
 
 def setUpModule():
     _HOME.start()
     _AVAIL.start()
+    _RESOLVE.start()
 
 
 def tearDownModule():
+    _RESOLVE.stop()
     _AVAIL.stop()
     _HOME.stop()
 
@@ -745,8 +755,10 @@ class TestASymlinkOutOfHomeIsWindowsGround(unittest.TestCase):
         import tempfile
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.link = os.path.join(self.tmp.name, "vault")
-        self.target = os.path.join(self.tmp.name, "mnt_c_target")
+        # realpath: macOS hands out /var/folders/..., itself a link to /private/var.
+        base = os.path.realpath(self.tmp.name)
+        self.link = os.path.join(base, "vault")
+        self.target = os.path.join(base, "mnt_c_target")
         os.makedirs(self.target)
         os.symlink(self.target, self.link)
 

@@ -68,7 +68,7 @@ rm -rf "$TMP_CLONE" 2>/dev/null || true
 # --- flip current atomically -------------------------------------------------
 mkdir -p "$BELAY_HOME"
 ln -sfn "$RELEASE_DIR" "$BELAY_HOME/.current.tmp.$$"
-mv -T "$BELAY_HOME/.current.tmp.$$" "$BELAY_HOME/current"
+python3 -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$BELAY_HOME/.current.tmp.$$" "$BELAY_HOME/current"
 echo "belay: current -> $RELEASE_DIR"
 
 # --- the wrapper -------------------------------------------------------------

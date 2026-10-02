@@ -114,7 +114,7 @@ migrate_slot() {
   fi
 
   mkdir -p "$(dirname "$new")"
-  if ! mv -T "$src" "$new"; then
+  if ! python3 -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$src" "$new"; then
     say "  $label: mv failed for $src" >&2
     status=1
     return 0
